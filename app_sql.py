@@ -1,28 +1,61 @@
 
 
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
-import pymysql
-pymysql.install_as_MySQLdb()
-import MySQLdb
-
-gmail_list=[]
-password_list=[]
-gmail_list1=[]
-password_list1=[]
-
-from flask import Flask, request, jsonify, render_template
-import joblib
-
+from flask import Flask, render_template, request
+from sklearn.ensemble import RandomForestClassifier
 
 import url_features
 
-# Load the model from the file 
-model = joblib.load('phishing.pkl')  
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "phishing.pkl"
+DATASET_PATH = BASE_DIR / "phishcoop.csv"
+DB_PATH = BASE_DIR / "user_database.sqlite3"
 
-# Use the loaded model to make predictions 
 
-app = Flask(__name__)
+def _init_user_db() -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_register (
+                user TEXT NOT NULL UNIQUE,
+                password TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+
+def _load_model():
+    if MODEL_PATH.exists():
+        return joblib.load(MODEL_PATH)
+
+    if not DATASET_PATH.exists():
+        raise FileNotFoundError("No training dataset found for phishing model.")
+
+    df = pd.read_csv(DATASET_PATH)
+    features = df.drop(columns=["id", "Result"], errors="ignore")
+    labels = df["Result"]
+    model = RandomForestClassifier(
+        n_estimators=200,
+        random_state=42,
+        max_depth=15,
+        min_samples_split=2,
+    )
+    model.fit(features, labels)
+    joblib.dump(model, MODEL_PATH)
+    return model
+
+
+app = Flask(__name__, template_folder=str(BASE_DIR / "templates"))
+_init_user_db()
+model = _load_model()
 
 
 @app.route('/')
@@ -30,169 +63,73 @@ def home():
     return render_template('register.html')
 
 
-@app.route('/register',methods=['POST'])
+@app.route('/register', methods=['POST'])
 def register():
-    
+    username = (request.form.get('username') or '').strip()
+    password = request.form.get('password') or ''
 
-    int_features2 = [str(x) for x in request.form.values()]
-    #print(int_features2)
-    #print(int_features2[0])
-    #print(int_features2[1])
-    r1=int_features2[0]
-    print(r1)
-    
-    r2=int_features2[1]
-    print(r2)
-    logu1=int_features2[0]
-    passw1=int_features2[1]
-        
-    
+    if not username or not password:
+        return render_template('register.html', text='Please enter both username and password.')
 
-    
+    with sqlite3.connect(DB_PATH) as conn:
+        existing = conn.execute(
+            'SELECT 1 FROM user_register WHERE user = ?', (username,)
+        ).fetchone()
+        if existing:
+            return render_template('register.html', text='This Username is Already in Use')
 
+        conn.execute(
+            'INSERT INTO user_register(user, password) VALUES (?, ?)',
+            (username, password),
+        )
+        conn.commit()
 
-    import MySQLdb
-
-
-# Open database connection
-    db = MySQLdb.connect("localhost","root",'',"ddbb" )
-
-# prepare a cursor object using cursor() method
-    cursor = db.cursor()
-    cursor.execute("SELECT user FROM user_register")
-    result1=cursor.fetchall()
-              #print(result1)
-              #print(gmail1)
-    for row1 in result1:
-                      print(row1)
-                      print(row1[0])
-                      gmail_list1.append(str(row1[0]))
-                      
-
-                      
-    print(gmail_list1)
-    if logu1 in gmail_list1:
-                      
-                      return render_template('register.html',text="This Username is Already in Use ")
-    else:
-
-                 
-
-
-# Prepare SQL query to INSERT a record into the database.
-                  sql = "INSERT INTO user_register(user,password) VALUES (%s,%s)"
-                  val = (r1, r2)
-   
-                  try:
-   # Execute the SQL command
-                                       cursor.execute(sql,val)
-   # Commit your changes in the database
-                                       db.commit()
-                  except:
-   # Rollback in case there is any error
-                                       db.rollback()
-
-# disconnect from server
-                  db.close()
-                  
-                  return render_template('register.html',text="Succesfully Registered")
-                
-                  return render_template('login.html')
+    return render_template('register.html', text='Succesfully Registered')
 
 
 @app.route('/login')
-def login(): 
-    return render_template('login.html')         
+def login():
+    return render_template('login.html')
 
 
-@app.route('/logedin',methods=['POST'])
+@app.route('/logedin', methods=['POST'])
 def logedin():
-    
-    int_features3 = [str(x) for x in request.form.values()]
-    print(int_features3)
-    logu=int_features3[0]
-    passw=int_features3[1]
-   # if int_features2[0]==12345 and int_features2[1]==12345:
+    username = (request.form.get('username') or '').strip()
+    password = request.form.get('password') or ''
 
-    import MySQLdb
+    with sqlite3.connect(DB_PATH) as conn:
+        record = conn.execute(
+            'SELECT password FROM user_register WHERE user = ?', (username,)
+        ).fetchone()
 
-
-# Open database connection
-    db = MySQLdb.connect("localhost","root","","ddbb" )
-
-# prepare a cursor object using cursor() method
-    cursor = db.cursor()
-    cursor.execute("SELECT user FROM user_register")
-    result1=cursor.fetchall()
-            
-    for row1 in result1:
-                      print(row1)
-                      print(row1[0])
-                      gmail_list.append(str(row1[0]))
-                      
-              
-                      
-    print(gmail_list)
-    
-
-    cursor1= db.cursor()
-    cursor1.execute("SELECT password FROM user_register")
-    result2=cursor1.fetchall()
-             
-    for row2 in result2:
-                      print(row2)
-                      print(row2[0])
-                      password_list.append(str(row2[0]))
-                      
-                 
-                      
-    print(password_list)
-    print(gmail_list.index(logu))
-    print(password_list.index(passw))
-    
-    if gmail_list.index(logu)==password_list.index(passw):
+    if record and record[0] == password:
         return render_template('index1.html')
-    else:
-        return render_template('login.html',text='Use Proper Username and Password')
 
-                                               
-
-
-
-                          
-
+    return render_template('login.html', text='Use Proper Username and Password')
 
 
 @app.route('/production')
-def production(): 
+def production():
     return render_template('index1.html')
 
 
-@app.route('/production/predict',methods=['POST'])
+@app.route('/production/predict', methods=['POST'])
 def predict():
-    '''
-    For rendering results on HTML GUI
-    '''
-    int_features = [str(x) for x in request.form.values()]
-    a=int_features
+    target_url = (request.form.get('url') or request.form.get('website') or '').strip()
+    if not target_url:
+        return render_template('index1.html', prediction_text='Please enter a URL to analyze.')
 
-    url_processed = url_features.main(a[0])
-      
-        
+    url_processed = pd.DataFrame(
+        [url_features.main(target_url)],
+        columns=url_features.FEATURE_COLUMNS,
+        dtype=float,
+    )
+    prediction = model.predict(url_processed)[0]
 
-
-    url_processed =np.array(url_processed ).reshape(1,-1)
-    prediction=model.predict(url_processed)
-    print(prediction)                                                                                                                                                                                              
-    
-    if prediction==-1:
-        return render_template('index1.html',prediction_text='This is a Phishing Website')
-    else:
-        return render_template('index1.html',prediction_text='This is not a Phishing Website')
+    if int(prediction) == -1:
+        return render_template('index1.html', prediction_text='This is a Phishing Website')
+    return render_template('index1.html', prediction_text='This is not a Phishing Website')
 
 
-
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=False)
